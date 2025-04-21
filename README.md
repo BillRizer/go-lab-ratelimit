@@ -81,8 +81,7 @@ Se o limite de requisições for ultrapassado, o IP ou token será bloqueado por
 A contagem de requisições é armazenada no Redis e é associada ao IP ou token. As chaves no Redis expiram a cada 1 segundo, garantindo que o limite de requisições por segundo seja corretamente validado. Após a expiração, a contagem é zerada, permitindo novas requisições.
 
 ## Testes Automatizados
-Os testes automatizados podem ser implementados para garantir que o rate limiter esteja funcionando corretamente sob diferentes condições de carga. A recomendação é usar ferramentas como Go test para criar testes unitários e de integração, validando os seguintes cenários:
-
-- Exceder o limite de requisições por IP.
-- Exceder o limite de requisições por token.
-- Verificar que as requisições dentro do limite são permitidas.
+Para executar os testes automatizados, utilize:
+```
+go test
+```

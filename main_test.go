@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,97 +9,151 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
-type RedisMock struct {
-	mock.Mock
-}
-
-func (r *RedisMock) Get(ctx context.Context, key string) *redis.StringCmd {
-	args := r.Called(ctx, key)
-	return args.Get(0).(*redis.StringCmd)
-}
-
-func (r *RedisMock) Incr(ctx context.Context, key string) *redis.IntCmd {
-	args := r.Called(ctx, key)
-	return args.Get(0).(*redis.IntCmd)
-}
-
-func (r *RedisMock) Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd {
-	args := r.Called(ctx, key, expiration)
-	return args.Get(0).(*redis.BoolCmd)
-}
-
-func TestInit(t *testing.T) {
-	os.Setenv("RATE_LIMIT_IP", "10")
-	os.Setenv("RATE_LIMIT_TOKEN", "20")
-	os.Setenv("BLOCK_TIME", "600")
-	Init()
-	assert.Equal(t, 10, rateLimitIP)
-	assert.Equal(t, 20, rateLimitToken)
-	assert.Equal(t, 600*time.Second, blockTime)
-}
-
-func TestRateLimiterWithIP(t *testing.T) {
-	redisMock := new(RedisMock)
-	redisMock.On("Get", context.Background(), "rate_limiter:ip:127.0.0.1").Return(&redis.StringCmd{})
-	redisMock.On("Incr", context.Background(), "rate_limiter:ip:127.0.0.1").Return(&redis.IntCmd{})
-	redisMock.On("Expire", context.Background(), "rate_limiter:ip:127.0.0.1", mock.Anything).Return(&redis.BoolCmd{})
-	handler := rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Request allowed"))
-	}))
-
-	req, err := http.NewRequest("GET", "/", nil)
+func TestRateLimiter(t *testing.T) {
+	redisAddr := os.Getenv("TEST_REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: redisAddr,
+		DB:   0,
+	})
+	_, err := redisClient.Ping(ctx).Result()
 	if err != nil {
-		t.Fatal(err)
+		t.Skipf("Teste skipped: Redis não disponível em %s: %v", redisAddr, err)
+		return
+	}
+	rateLimitIP = 2
+	rateLimitToken = 3
+	blockTime = 1 * time.Second
+	cleanupRedisKeys(t)
+	defer cleanupRedisKeys(t)
+	tests := []struct {
+		name           string
+		ip             string
+		token          string
+		expectedStatus int
+		requests       int
+	}{
+		{
+			name:           "IP baseado: dentro do limite",
+			ip:             "192.168.1.1",
+			token:          "",
+			expectedStatus: http.StatusOK,
+			requests:       1,
+		},
+		{
+			name:           "IP baseado: no limite",
+			ip:             "192.168.1.2",
+			token:          "",
+			expectedStatus: http.StatusOK,
+			requests:       2,
+		},
+		{
+			name:           "IP baseado: excedeu limite",
+			ip:             "192.168.1.3",
+			token:          "",
+			expectedStatus: http.StatusTooManyRequests,
+			requests:       3,
+		},
+		{
+			name:           "Token baseado: dentro do limite",
+			ip:             "192.168.1.4",
+			token:          "test-token-1",
+			expectedStatus: http.StatusOK,
+			requests:       3,
+		},
+		{
+			name:           "Token baseado: excedeu limite",
+			ip:             "192.168.1.5",
+			token:          "test-token-2",
+			expectedStatus: http.StatusTooManyRequests,
+			requests:       4,
+		},
 	}
 
-	req.RemoteAddr = "127.0.0.1"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, "Request allowed", rr.Body.String())
-	redisMock.AssertExpectations(t)
-}
-
-
-func TestRateLimiterWithToken(t *testing.T) {
-	redisMock := new(RedisMock)
-	redisMock.On("Get", context.Background(), "rate_limiter:token:my-api-key").Return(&redis.StringCmd{})
-	redisMock.On("Incr", context.Background(), "rate_limiter:token:my-api-key").Return(&redis.IntCmd{})
-	redisMock.On("Expire", context.Background(), "rate_limiter:token:my-api-key", mock.Anything).Return(&redis.BoolCmd{})
-	handler := rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Request allowed"))
-	}))
-
-	req, err := http.NewRequest("GET", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanupSpecificKeys(t, tt.ip, tt.token)
+			var lastStatusCode int
+			for i := 0; i < tt.requests; i++ {
+				req, err := http.NewRequest("GET", "/", nil)
+				if err != nil {
+					t.Fatalf("Erro ao criar request: %v", err)
+				}
+				req.RemoteAddr = tt.ip
+				if tt.token != "" {
+					req.Header.Set("API_KEY", tt.token)
+				}
+				rr := httptest.NewRecorder()
+				rateLimiter(rr, req)
+				lastStatusCode = rr.Code
+			}
+			assert.Equal(t, tt.expectedStatus, lastStatusCode,
+				"Status code esperado %d, recebido %d", tt.expectedStatus, lastStatusCode)
+		})
 	}
 
-	req.Header.Set("API_KEY", "my-api-key")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, "Request allowed", rr.Body.String())
-	redisMock.AssertExpectations(t)
+	t.Run("Reset após estar expirado", func(t *testing.T) {
+		ip := "192.168.1.6"
+		key := "rate_limter:ip:" + ip
+
+		redisClient.Del(ctx, key)
+
+		oldBlockTime := blockTime
+		blockTime = 1 * time.Second
+		defer func() { blockTime = oldBlockTime }()
+
+		for i := 0; i < rateLimitIP; i++ {
+			req, _ := http.NewRequest("GET", "/", nil)
+			req.RemoteAddr = ip
+			rr := httptest.NewRecorder()
+			rateLimiter(rr, req)
+			assert.Equal(t, http.StatusOK, rr.Code)
+		}
+		req, _ := http.NewRequest("GET", "/", nil)
+		req.RemoteAddr = ip
+
+		rr := httptest.NewRecorder()
+		rateLimiter(rr, req)
+		assert.Equal(t, http.StatusTooManyRequests, rr.Code)
+		time.Sleep(blockTime + 100*time.Millisecond)
+		req, _ = http.NewRequest("GET", "/", nil)
+		req.RemoteAddr = ip
+		rr = httptest.NewRecorder()
+		rateLimiter(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
 }
 
-func TestRateLimiterLimitExceeded(t *testing.T) {
-	redisMock := new(RedisMock)
-	redisMock.On("Get", context.Background(), "rate_limiter:ip:127.0.0.1").Return(&redis.StringCmd{}).Once()
-	handler := rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Request allowed"))
-	}))
-	req, err := http.NewRequest("GET", "/", nil)
+func cleanupRedisKeys(t *testing.T) {
+	keys, err := redisClient.Keys(ctx, "rate_limter:*").Result()
 	if err != nil {
-		t.Fatal(err)
+		t.Logf("Erro ao buscar chaves para limpeza: %v", err)
+		return
 	}
-	req.RemoteAddr = "127.0.0.1"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
-	assert.Equal(t, "You have reached the maximum number of requests or actions allowed within a certain time frame", rr.Body.String())
-	redisMock.AssertExpectations(t)
+	if len(keys) > 0 {
+		_, err = redisClient.Del(ctx, keys...).Result()
+		if err != nil {
+			t.Logf("Erro ao limpar chaves: %v", err)
+		}
+	}
+}
+
+func cleanupSpecificKeys(t *testing.T, ip, token string) {
+	var keys []string
+	if token != "" {
+		keys = append(keys, "rate_limter:token:"+token)
+	}
+	if ip != "" {
+		keys = append(keys, "rate_limter:ip:"+ip)
+	}
+	if len(keys) > 0 {
+		_, err := redisClient.Del(ctx, keys...).Result()
+		if err != nil {
+			t.Logf("Erro ao limpar chaves específicas: %v", err)
+		}
+	}
 }
