@@ -34,7 +34,7 @@ Crie um arquivo `.env` na raiz do projeto
 REDIS_ADDR=localhost:6379          # Endereço do Redis
 RATE_LIMIT_IP=5                    # Limite de requisições por segundo por IP
 RATE_LIMIT_TOKEN=10                # Limite de requisições por segundo por Token
-BLOCK_TIME=300                     # Tempo de bloqueio em segundos (5 minutos)
+BLOCK_TIME_SECONDS=300                     # Tempo de bloqueio em segundos (5 minutos)
 ```
 
 Execute o projeto

@@ -33,7 +33,7 @@ func Init() {
 
 	rateLimitIP = getEnvInt("RATE_LIMIT_IP", 5)
 	rateLimitToken = getEnvInt("RATE_LIMIT_TOKEN", 10)
-	blockTime = time.Duration(getEnvInt("BLOCK_TIME", 300)) * time.Second
+	blockTime = time.Duration(getEnvInt("BLOCK_TIME_SECONDS", 300)) * time.Second
 }
 
 func getEnv(key, fallback string) string {

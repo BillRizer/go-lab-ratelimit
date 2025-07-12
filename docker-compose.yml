@@ -18,7 +18,7 @@ services:
       - REDIS_ADDR=redis:6379
       - RATE_LIMIT_IP=5
       - RATE_LIMIT_TOKEN=10
-      - BLOCK_TIME=300
+      - BLOCK_TIME_SECONDS=300
     depends_on:
       - redis
     networks:
