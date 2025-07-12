@@ -101,6 +101,7 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	Init()
 	r := mux.NewRouter()
 	r.Use(rateLimitMiddleware)
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

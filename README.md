@@ -75,7 +75,7 @@ Cada IP é associado a uma chave única no Redis (com o prefixo rate_limiter:ip:
 Se a requisição contiver um cabeçalho API_KEY com um token de acesso válido, a limitação será aplicada com base nesse token. Cada token é associado a uma chave única no Redis (com o prefixo rate_limiter:token:), e o contador de requisições é incrementado de forma semelhante ao caso do IP.
 
 3. Estratégia de Bloqueio:
-Se o limite de requisições for ultrapassado, o IP ou token será bloqueado por um tempo determinado (definido pela variável BLOCK_TIME, em segundos). Durante esse período, as requisições serão rejeitadas.
+Se o limite de requisições for ultrapassado, o IP ou token será bloqueado por um tempo determinado (definido pela variável BLOCK_TIME_SECONDS, em segundos). Durante esse período, as requisições serão rejeitadas.
 
 4. Persistência no Redis:
 A contagem de requisições é armazenada no Redis e é associada ao IP ou token. As chaves no Redis expiram a cada 1 segundo, garantindo que o limite de requisições por segundo seja corretamente validado. Após a expiração, a contagem é zerada, permitindo novas requisições.
